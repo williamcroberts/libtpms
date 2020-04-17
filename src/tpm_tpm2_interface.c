@@ -362,11 +362,14 @@ char *TPM2_GetInfo(enum TPMLIB_InfoFlags flags)
     "\"TPMAttributes\":{"
         "\"manufacturer\":\"id:00001014\","
         "\"version\":\"id:%08X\","
-        "\"model\":\"swtpm\""
+        "\"model\":\"swtpm\","
+        "\"RSAKeySizes\":[%s]"
     "}";
     char *fmt = NULL, *buffer;
     bool printed = false;
     char *tpmattrs = NULL;
+    char rsakeys[32];
+    size_t n;
 
     if (!(buffer = strdup("{%s%s%s}")))
         return NULL;
@@ -383,7 +386,13 @@ char *TPM2_GetInfo(enum TPMLIB_InfoFlags flags)
     if ((flags & TPMLIB_INFO_TPMATTRIBUTES)) {
         fmt = buffer;
         buffer = NULL;
-        if (asprintf(&tpmattrs, tpmattrs_temp, FIRMWARE_V1) < 0)
+        n = snprintf(rsakeys, sizeof(rsakeys), "%s2048%s%s",
+                     RSA_1024 ? "1024," : "",
+                     RSA_3072 ? ",3072" : "",
+                     RSA_4096 ? ",4096" : "");
+        if (n >= sizeof(rsakeys))
+            goto error;
+        if (asprintf(&tpmattrs, tpmattrs_temp, FIRMWARE_V1, rsakeys) < 0)
             goto error;
         if (asprintf(&buffer, fmt,  printed ? "," : "",
                      tpmattrs, "%s%s%s") < 0)
