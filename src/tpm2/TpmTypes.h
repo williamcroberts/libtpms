@@ -316,7 +316,7 @@ typedef  UINT32             TPM_SPEC;
 #define TPM_SPEC_FAMILY         (TPM_SPEC)(SPEC_FAMILY)
 #define SPEC_LEVEL              00
 #define TPM_SPEC_LEVEL          (TPM_SPEC)(SPEC_LEVEL)
-#define SPEC_VERSION            159
+#define SPEC_VERSION            160
 #define TPM_SPEC_VERSION        (TPM_SPEC)(SPEC_VERSION)
 #define SPEC_YEAR               2019
 #define TPM_SPEC_YEAR           (TPM_SPEC)(SPEC_YEAR)
