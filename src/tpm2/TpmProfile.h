@@ -277,7 +277,7 @@
 #define MAX_CAP_BUFFER                  1024
 #endif
 #ifndef NV_MEMORY_SIZE
-#define NV_MEMORY_SIZE                  (128 * 1024) /* libtpms changed */
+#define NV_MEMORY_SIZE                  (128 * 1024 + 45760) /* libtpms changed; 45760 bytes more needed due to RSA 3072 expanding OBJECT */
 #endif
 #ifndef MIN_COUNTER_INDICES
 #define MIN_COUNTER_INDICES             8
