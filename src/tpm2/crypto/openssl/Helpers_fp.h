@@ -63,6 +63,8 @@
 
 #include "TpmTypes.h"
 
+#include <assert.h>
+
 #include <openssl/evp.h>
 
 #if USE_OPENSSL_FUNCTIONS_SYMMETRIC
@@ -113,5 +115,48 @@ InitOpenSSLRSAPrivateKey(OBJECT     *rsaKey,   // IN
                         );
 
 #endif // USE_OPENSSL_FUNCTIONS_RSA
+
+#define ALWAYS_INLINE __attribute__((always_inline))
+
+static inline unsigned int ALWAYS_INLINE vb(unsigned int m)
+{
+    volatile unsigned int x = m;
+
+    return x;
+}
+
+static inline unsigned char ALWAYS_INLINE select_char(unsigned char mask,
+                                                      unsigned char a,
+                                                      unsigned char b)
+{
+    return (vb(mask) & a) | (vb(~mask) & b);
+}
+
+static inline unsigned short ALWAYS_INLINE select_short(unsigned short mask,
+                                                        unsigned short a,
+                                                        unsigned short b)
+{
+    return (vb(mask) & a) | (vb(~mask) & b);
+}
+
+static inline BOOL ALWAYS_INLINE ct_lt(unsigned int a, unsigned int b)
+{
+   /* a < b -> a - b < 0 ? */
+#define __SHIFT ((sizeof(a) * 8) - 1);
+    return ((int)(a - b)) >> __SHIFT;
+#undef __SHIFT
+}
+
+static inline BOOL ALWAYS_INLINE ct_le(unsigned int a, unsigned int b)
+{
+    /* a <= b -> a < (b + 1) */
+    return ct_lt(a, b + 1);
+}
+
+static inline BOOL ALWAYS_INLINE ct_gt(unsigned int a, unsigned int b)
+{
+   /* a > b ? -> b < a ? */
+   return ct_lt(b, a);
+}
 
 #endif  /* HELPERS_FP_H */

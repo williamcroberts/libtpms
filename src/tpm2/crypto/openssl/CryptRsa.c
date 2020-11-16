@@ -1383,6 +1383,37 @@ CryptRsaEncrypt(
     return retVal;
 }
 
+/* Simulate the generation of the padding part PS of the pkcs v1.5 padding. Its size
+ * must be at least 8 bytes. We return the number of bytes or 0 in case of failure.
+ */
+static UINT16
+SimulatePSGeneration(DRBG_STATE *drbg,          // IN: drbg to use
+                     TPM2B      *buffer         // IN: buffer to use
+                     )
+{
+    size_t i;
+    UINT16 psSize;
+
+    while (true) {
+        if (buffer->size != DRBG_Generate((RAND_STATE *)drbg, buffer->buffer,
+                                          buffer->size))
+            return 0;
+
+        psSize = 0;
+        for (i = 0; i < buffer->size; i++) {
+            if (buffer->buffer[i])
+                psSize++;
+            else
+                break;
+        }
+        /* minimum size of ps is 8 */
+        if (psSize > 8)
+             return psSize;
+        /* feed entropy to the DRBG */
+        DRBG_AdditionalData(drbg, buffer);
+    }
+}
+
 LIB_EXPORT TPM_RC
 CryptRsaDecrypt(
 		TPM2B               *dOut,          // OUT: the decrypted data
@@ -1399,7 +1430,14 @@ CryptRsaDecrypt(
     const char            *digestname;
     size_t                 outlen;
     unsigned char         *tmp = NULL;
-    unsigned char          buffer[MAX_RSA_KEY_BYTES];
+    unsigned char          buffer[MAX_RSA_KEY_BYTES];     /* must be size of max key */
+    /* pkcsv1.5 related variables */
+    DRBG_STATE             drbg;
+    TPM2B_TYPE(MAX_RSA_KEY, MAX_RSA_KEY_BYTES);
+    TPM2B_MAX_RSA_KEY      psbuffer;                      /* must be size of max key */
+    TPM2B_MAX_RSA_KEY      fakeMsg;
+    int                    rc;
+    UINT16                 psSize;
 
     // Make sure that the necessary parameters are provided
     pAssert(cIn != NULL && dOut != NULL && key != NULL);
@@ -1425,6 +1463,28 @@ CryptRsaDecrypt(
             break;
 	  case ALG_RSAES_VALUE:
             if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_PADDING) <= 0)
+                ERROR_RETURN(TPM_RC_FAILURE);
+
+            /* Simulate the generation of padding part 'PS' so we can derive
+             * a message length to return: keysize - 2 - psSize - 1
+             */
+            if (DRBG_InstantiateSeeded(&drbg, cIn, NULL, NULL,
+                                       &key->sensitive.sensitive.rsa.b,
+                                       0 /* compat level not relevant */) != 0)
+                ERROR_RETURN(TPM_RC_FAILURE);
+            psbuffer.t.size = key->publicArea.unique.rsa.t.size - 2 - 1;
+            psSize = SimulatePSGeneration(&drbg, &psbuffer.b);
+            if (psSize < 8)
+                ERROR_RETURN(TPM_RC_FAILURE);
+
+            if (DRBG_InstantiateSeeded(&drbg, &key->sensitive.sensitive.rsa.b,
+                                       NULL, NULL, cIn,
+                                       0 /* compat level not relevant */) != 0)
+                ERROR_RETURN(TPM_RC_FAILURE);
+            /* always generate a buffer with a random response */
+            fakeMsg.b.size = key->publicArea.unique.rsa.t.size - 2 - psSize - 1;
+            if (fakeMsg.b.size != DRBG_Generate((RAND_STATE *)&drbg, fakeMsg.b.buffer,
+                                                fakeMsg.b.size))
                 ERROR_RETURN(TPM_RC_FAILURE);
             break;
 	  case ALG_OAEP_VALUE:
@@ -1456,15 +1516,29 @@ CryptRsaDecrypt(
 
     /* cannot use cOut->buffer */
     outlen = sizeof(buffer);
-    if (EVP_PKEY_decrypt(ctx, buffer, &outlen,
-                         cIn->buffer, cIn->size) <= 0)
-        ERROR_RETURN(TPM_RC_FAILURE);
+    rc = EVP_PKEY_decrypt(ctx, buffer, &outlen,
+                          cIn->buffer, cIn->size);
 
-    if (outlen > dOut->size)
-        ERROR_RETURN(TPM_RC_FAILURE);
+    switch (scheme->scheme) {
+    case ALG_RSAES_VALUE: {
+        size_t i;
+        /* decryption failed if: rc <= 0 or outlen > dOut->size */
+        BOOL decFailure = ct_le(rc, 0) | ct_gt(outlen, dOut->size);
+        /* decryption failed: mask = 0xffff; decryption success: mask = 0 */
+        short mask = 0 - decFailure;
 
-    memcpy(dOut->buffer, buffer, outlen);
-    dOut->size = outlen;
+        dOut->size = select_short(mask, fakeMsg.b.size, outlen);
+        for (i = 0; i < dOut->size; i++)
+            dOut->buffer[i] = select_char(mask, fakeMsg.b.buffer[i], buffer[i]);
+        break;
+    }
+    default:
+        if (rc <= 0 || outlen > dOut->size)
+            ERROR_RETURN(TPM_RC_FAILURE);
+
+        memcpy(dOut->buffer, buffer, outlen);
+        dOut->size = outlen;
+    }
 
     retVal = TPM_RC_SUCCESS;
 
